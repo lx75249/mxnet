@@ -67,46 +67,19 @@ void adadelta_update(RunContext ctx, TBlob weight, const TBlob grad,
   Tensor<xpu, 2> grad2d = grad.FlatTo2D<xpu, real_t>(s);
   Tensor<xpu, 2> g2 = acc_g.FlatTo2D<xpu, real_t>(s);
   Tensor<xpu, 2> delta = acc_delta.FlatTo2D<xpu, real_t>(s);
-  std::unique_ptr<real_t> tmp(new real_t[delta.shape_[0] * delta.shape_[1]]);
-  TBlob Zero(tmp.get(), acc_delta.shape_, acc_delta.dev_mask_);
-  Tensor<xpu, 2> zero = Zero.FlatTo2D<xpu, real_t>(s);
   if (param.clip_gradient >= 0.0f) {
     weight2d -= param.rescale_grad*F<adadelta_clip>(grad2d, param.clip_gradient) +
                 wd*weight2d;
   } else {
     auto t2 = delta + ScalarExp<real_t>(param.eps);
-    LG << "eps = " << param.eps;
-    zero = t2;
-    LG << "delta + eps = " << zero.dptr_[0];
-    /*
     g2 *= param.rho;
     g2 += (1.0f - param.rho) * F<mshadow_op::square>(grad2d);
-    zero = 0 + grad2d;
-    LG << "grad2d = " << zero.dptr_[0];
-    zero = 0 + delta;
-    LG << "delta =" << zero.dptr_[0];
     auto t2 = delta + param.eps;
-    LG << "eps = " << param.eps;
-    zero = 0 + t2;
-    LG << "delta + eps = " << zero.dptr_[0];
-    zero = 0 + g2;
-    LG << "g2 = " << zero.dptr_[0];
     auto g2e = g2 + param.eps;
-    zero = 0 + g2e;
-    LG << "g2 + eps = " << zero.dptr_[0];
     auto rms_delta = F<mshadow_op::square_root>(t2);
-    zero = 0 + rms_delta;
-    LG << zero.dptr_[0];
     auto rms_g = F<mshadow_op::square_root>(g2e);
-    zero = 0 + rms_g;
-    LG << zero.dptr_[0];
     auto ratio = F<mshadow::op::div>(rms_delta, rms_g);
-    zero = 0 + ratio;
-    LG << zero.dptr_[0];
     auto current_delta = F<mshadow::op::mul>(ratio, grad2d);
-    zero *= 0.0f;
-    zero += current_delta;
-    LG << zero.dptr_[0];
     auto decayed = wd*weight2d;
     //auto diff = current_delta + decayed;
     //weight2d -= diff;
@@ -115,7 +88,6 @@ void adadelta_update(RunContext ctx, TBlob weight, const TBlob grad,
     auto cdelta2 = F<mshadow_op::square>(current_delta);
     delta *= param.rho;
     delta += (1 - param.rho) * cdelta2;
-    */
   }
 }
 
