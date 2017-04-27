@@ -24,7 +24,7 @@ inline Symbol ConvFactory(Symbol data, int num_filter,
 	return relu ? Activation(conv, ActivationActType::relu) : conv;
 }
 
-Symbol Model()
+Symbol Model(int patch_size)
 {
 	Symbol data = Symbol::Variable("data");
 	Symbol data_label = Symbol::Variable("data_label");
@@ -33,20 +33,22 @@ Symbol Model()
 
 	std::vector<Symbol> conv;
 	conv.push_back(conv1);
-	for (int i = 2; i <= 0; ++i) {
+	for (int i = 2; i <= 5; ++i) {
 		std::string layerID = std::to_string(i);
 		Symbol convx = ConvFactory(conv.back(), 1, Shape(3, 3), Shape(1, 1), Shape(1, 1), layerID);
 		conv.push_back(convx);
 	}
 
-	auto conv20 = ConvFactory(conv.back(), 1, Shape(3, 3), Shape(1, 1), Shape(1, 1), "2", false);
+	auto conv20 = ConvFactory(conv.back(), 1, Shape(3, 3), Shape(1, 1), Shape(1, 1), "20", false);
 
-  //auto pred = conv20 + data;
-  //auto diff = pred - data_label;
-  auto pred = conv20;
-  auto diff = conv20;
+  auto pred = conv20 + data;
+  auto diff = pred - data_label;
+  //auto pred = conv20;
+  //auto diff = conv20;
 
-  auto loss = MakeLoss(sum(diff * diff, Shape(2, 3)));
+  auto l2 = sum(diff*diff, Shape(2, 3)) / (1.0f * patch_size * patch_size);
+
+  auto loss = MakeLoss(l2);
 
   return Symbol::Group({BlockGrad(pred), loss});
 	//auto res = broadcast_add("sum", data, conv20);
@@ -62,7 +64,7 @@ int main()
 	int patch_size = 41;
 	float learning_rate = 0.01;
 	float weight_decay = 1e-4;
-	auto ctx = Context::cpu();
+	auto ctx = Context::gpu();
 	// auto ctx = Context::cpu();
 
 	auto model = Model();
@@ -77,7 +79,6 @@ int main()
 
 	auto initializer = Normal(0, sqrt(2.0 / 9.0 / 64.0));
 	for (auto &arg : args_map) {
-    std::cout << arg.first << std::endl;
 		if (arg.first.find('w')) {
 			initializer(arg.first, &arg.second);
 		}
@@ -131,23 +132,8 @@ int main()
   */
 	Optimizer* opt = OptimizerRegistry::Find("sgd");
 	opt->SetParam("rescale_grad", 1.0 / batch_size);
-  opt->SetParam("clip_gradient", 10);
+  //opt->SetParam("clip_gradient", 100);
 	opt->SetParam("momentum", 0.9);
-
-      std::vector<mx_float> pred_data;
-      std::vector<mx_float> w_data;
-      w_data.resize(args_map["conv1_w"].Size());
-      args_map["conv1_w"].SyncCopyToCPU(&w_data);
-      for (int i=0; i<10; ++i) {
-        std::cout << w_data[i] << ' ';
-      }
-      std::cout << "---------------------" << std::endl;
-      w_data.resize(args_map["conv2_w"].Size());
-      args_map["conv2_w"].SyncCopyToCPU(&w_data);
-      for (int i=0; i<10; ++i) {
-        std::cout << w_data[i] << ' ';
-      }
-      std::cout << "---------------------" << std::endl;
 
 	for (int iter = 0; iter < max_epoch; ++iter) {
 		LG << "Epoch: " << iter;
@@ -171,22 +157,7 @@ int main()
 			exec->Backward();
 			exec->UpdateAll(opt, learning_rate, weight_decay);
 
-			if (samples % (100 * batch_size) == batch_size) {
-      NDArray::WaitAll();
-      pred_data.resize(label_batch.data.Size());
-      w_data.resize(args_map["conv1_w"].Size());
-      exec->outputs[0].SyncCopyToCPU(&pred_data);
-      args_map["conv1_w"].SyncCopyToCPU(&w_data);
-      NDArray::WaitAll();
-      std::cout << "dim = "; for (auto dim : exec->outputs[0].GetShape()) { std::cout << dim << ','; } std::cout << std::endl;
-      std::cout << "pred = "; for (int i=0; i<10; ++i) { std::cout << pred_data[i] << ' '; } std::cout << std::endl;
-      std::cout << "label = "; for (int i=0; i<10; ++i) { std::cout << norm_l.GetData()[i] << ' '; } std::cout << std::endl;
-      std::cout << "conv1_w = "; for (int i=0; i<10; ++i) { std::cout << w_data[i] << ' '; } std::cout << std::endl;
-      w_data.resize(exec->grad_dict()["conv2_w"].Size());
-      exec->grad_dict()["conv2_w"].SyncCopyToCPU(&w_data);
-      NDArray::WaitAll();
-      std::cout << "conv2_w = "; for(int i=100; i<110; ++i) { std::cout << w_data[i] << ' '; } std::cout << std::endl;
-
+			if (samples % (100 * batch_size) == 0) {
 				LG << "Epoch:\t" << iter << " : " << samples;// << " Acc: " << acu.Get();
 			}
 
@@ -202,14 +173,16 @@ int main()
 			while (val_iter.Next(), val_label_iter.Next()) {
 				auto data_batch = val_iter.GetDataBatch();
 				auto label_batch = val_label_iter.GetDataBatch();
-				data_batch.data.CopyTo(&args_map["data"]);
-				label_batch.data.CopyTo(&args_map["data_label"]);
+        NDArray norm_d = data_batch.data/256.0;
+        NDArray norm_l = label_batch.data/256.0;
+				norm_d.CopyTo(&args_map["data"]);
+				norm_l.CopyTo(&args_map["data_label"]);
 				NDArray::WaitAll();
 
 				auto *exec = model.SimpleBind(ctx, args_map);
 				exec->Forward(false);
 				NDArray::WaitAll();
-				acu.Update(label_batch.data, exec->outputs[0]);
+				acu.Update(norm_l, exec->outputs[0]);
 				delete exec;
 			}
 		}

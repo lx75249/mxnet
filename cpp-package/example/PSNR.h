@@ -158,7 +158,7 @@ public:
 		for (int i = 0; i < batch_size; ++i) {
 			float sum = 0;
 			for (int j = 0; j < width * height; ++j) {
-				sum += fabs(pred_data[i] - label_data[i])/255.0;
+				sum += fabs(pred_data[i] - label_data[i]);
 			}
 
       /*
