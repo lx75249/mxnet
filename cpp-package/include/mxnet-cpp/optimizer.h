@@ -124,6 +124,7 @@ class SGDOptimizer : public Optimizer {
   AtomicSymbolCreator mom_update_handle_;
 };
 
+<<<<<<< HEAD
 class RMSPropOptimizer : public Optimizer {
  public:
   RMSPropOptimizer(unsigned begin_num_update = 0);
@@ -171,7 +172,6 @@ class AdaDeltaOptimizer : public Optimizer {
   void CreateState_(int index, NDArray weight) override;
   std::map<int, NDArray*> acc_g_, acc_delta_;
 };
-
 
 }  // namespace cpp
 }  // namespace mxnet
