@@ -67,7 +67,7 @@ int main()
 	auto ctx = Context::gpu();
 	// auto ctx = Context::cpu();
 
-	auto model = Model();
+	auto model = Model(patch_size);
 	std::map<std::string, NDArray> args_map;
 	std::map<std::string, NDArray> aux_map;
 
@@ -134,6 +134,7 @@ int main()
 	opt->SetParam("rescale_grad", 1.0 / batch_size);
   //opt->SetParam("clip_gradient", 100);
 	opt->SetParam("momentum", 0.9);
+  opt->SetParam("clip_gradient", 100);
 
 	for (int iter = 0; iter < max_epoch; ++iter) {
 		LG << "Epoch: " << iter;
@@ -200,7 +201,7 @@ int main()
 		LG << "Epoch:\t" << iter << " "
 			<< samples / duration * patch_size * patch_size
 			<< " pixel/sec in "
-			<< duration << "s Accuracy: " << acu.sum_metric;
+			<< duration << "s Accuracy: " << acu.Get();
 	}
 
 	MXNotifyShutdown();
