@@ -18,10 +18,10 @@ inline Symbol ConvFactory(Symbol data, int num_filter,
 {
 	Symbol conv_w("conv" + name + "_w"), conv_b("conv" + name + "_b");
 
-	Symbol conv = Convolution(data,
+	Symbol conv = Convolution("conv" + name, data,
 							  conv_w, conv_b, kernel,
 							  num_filter, stride, Shape(1, 1), pad);
-	return relu ? Activation(conv, ActivationActType::relu) : conv;
+	return relu ? Activation("relu" + name, conv, ActivationActType::relu) : conv;
 }
 
 Symbol Model(int patch_size)
@@ -33,7 +33,7 @@ Symbol Model(int patch_size)
 
 	std::vector<Symbol> conv;
 	conv.push_back(conv1);
-	for (int i = 2; i <= 5; ++i) {
+	for (int i = 2; i <= 13; ++i) {
 		std::string layerID = std::to_string(i);
 		Symbol convx = ConvFactory(conv.back(), 64, Shape(3, 3), Shape(1, 1), Shape(1, 1), layerID);
 		conv.push_back(convx);
@@ -46,7 +46,7 @@ Symbol Model(int patch_size)
   //auto pred = conv20;
   //auto diff = conv20;
 
-  auto l2 = sum(diff*diff, Shape(2, 3)) / (1.0f * patch_size * patch_size);
+  auto l2 = sum("sum", diff*diff / (1.0f * patch_size * patch_size), Shape(2, 3)) ;
 
   auto loss = MakeLoss(l2);
 
@@ -63,7 +63,7 @@ int main()
 	int max_epoch = 20;
 	int patch_size = 41;
 	float learning_rate = 0.01;
-	float weight_decay = 1e-4;
+	float weight_decay = 1e-2;
 	auto ctx = Context::gpu();
 	// auto ctx = Context::cpu();
 
@@ -123,18 +123,20 @@ int main()
 		.SetParam("label_width", 1)
 		.CreateDataIter();
 
-  /*
 	Optimizer* opt = OptimizerRegistry::Find("adam");
-	opt->SetParam("rescale_grad", 1.0 / batch_size)
-     ->SetParam("beta1", 0.9)
-     ->SetParam("beta2", 0.999)
-     ->SetParam("epsilon", 1e-8);
-  */
+	opt->SetParam("rescale_grad", 1.0 / batch_size);
+  /*
 	Optimizer* opt = OptimizerRegistry::Find("sgd");
 	opt->SetParam("rescale_grad", 1.0 / batch_size);
-  //opt->SetParam("clip_gradient", 100);
 	opt->SetParam("momentum", 0.9);
-  opt->SetParam("clip_gradient", 0.1);
+  */
+  //opt->SetParam("clip_gradient", 100);
+  opt->SetParam("clip_gradient", 1);
+
+  Monitor mon(100, std::regex("_output|conv1_w"));
+  //Monitor mon(100);
+  auto *exec = model.SimpleBind(ctx, args_map);
+  mon.install(exec);
 
 	for (int iter = 0; iter < max_epoch; ++iter) {
 		LG << "Epoch: " << iter;
@@ -144,16 +146,16 @@ int main()
 		train_iter.Reset();
 		train_label_iter.Reset();
 		while (train_iter.Next(), train_label_iter.Next()) {
+      mon.tic();
 			samples += batch_size;
 			auto data_batch = train_iter.GetDataBatch();
 			auto label_batch = train_label_iter.GetDataBatch();
-      NDArray norm_d = data_batch.data/256.0;
-      NDArray norm_l = label_batch.data/256.0;
+      NDArray norm_d = data_batch.data/255.0;
+      NDArray norm_l = label_batch.data/255.0;
 			norm_d.CopyTo(&args_map["data"]);
 			norm_l.CopyTo(&args_map["data_label"]);
 			NDArray::WaitAll();
 
-			auto *exec = model.SimpleBind(ctx, args_map);
 			exec->Forward(true);
 			exec->Backward();
 			exec->UpdateAll(opt, learning_rate, weight_decay);
@@ -161,8 +163,7 @@ int main()
 			if (samples % (100 * batch_size) == 0) {
 				LG << "Epoch:\t" << iter << " : " << samples;// << " Acc: " << acu.Get();
 			}
-
-			delete exec;
+      //mon.toc_print();
 		}
 
 		auto toc = std::chrono::system_clock::now();
@@ -174,17 +175,15 @@ int main()
 			while (val_iter.Next(), val_label_iter.Next()) {
 				auto data_batch = val_iter.GetDataBatch();
 				auto label_batch = val_label_iter.GetDataBatch();
-        NDArray norm_d = data_batch.data/256.0;
-        NDArray norm_l = label_batch.data/256.0;
+        NDArray norm_d = data_batch.data/255.0;
+        NDArray norm_l = label_batch.data/255.0;
 				norm_d.CopyTo(&args_map["data"]);
 				norm_l.CopyTo(&args_map["data_label"]);
 				NDArray::WaitAll();
 
-				auto *exec = model.SimpleBind(ctx, args_map);
 				exec->Forward(false);
 				NDArray::WaitAll();
 				acu.Update(norm_l, exec->outputs[0]);
-				delete exec;
 			}
 		}
 
