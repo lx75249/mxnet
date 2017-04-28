@@ -124,7 +124,6 @@ class SGDOptimizer : public Optimizer {
   AtomicSymbolCreator mom_update_handle_;
 };
 
-<<<<<<< HEAD
 class RMSPropOptimizer : public Optimizer {
  public:
   RMSPropOptimizer(unsigned begin_num_update = 0);

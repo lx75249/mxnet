@@ -29,13 +29,13 @@ Symbol Model(int patch_size)
 	Symbol data = Symbol::Variable("data");
 	Symbol data_label = Symbol::Variable("data_label");
 
-	auto conv1 = ConvFactory(data, 20, Shape(3, 3), Shape(1, 1), Shape(1, 1), "1");
+	auto conv1 = ConvFactory(data, 64, Shape(3, 3), Shape(1, 1), Shape(1, 1), "1");
 
 	std::vector<Symbol> conv;
 	conv.push_back(conv1);
 	for (int i = 2; i <= 5; ++i) {
 		std::string layerID = std::to_string(i);
-		Symbol convx = ConvFactory(conv.back(), 1, Shape(3, 3), Shape(1, 1), Shape(1, 1), layerID);
+		Symbol convx = ConvFactory(conv.back(), 64, Shape(3, 3), Shape(1, 1), Shape(1, 1), layerID);
 		conv.push_back(convx);
 	}
 
@@ -134,7 +134,7 @@ int main()
 	opt->SetParam("rescale_grad", 1.0 / batch_size);
   //opt->SetParam("clip_gradient", 100);
 	opt->SetParam("momentum", 0.9);
-  opt->SetParam("clip_gradient", 100);
+  opt->SetParam("clip_gradient", 0.1);
 
 	for (int iter = 0; iter < max_epoch; ++iter) {
 		LG << "Epoch: " << iter;
