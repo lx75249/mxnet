@@ -34,7 +34,8 @@ inline mxnet::cpp::NDArray _sqrt(mxnet::cpp::NDArray data) {
     .Invoke()[0];
 }
 
-}
+}  // namespace
+>>>>>>> lx/cpp-monitor
 
 namespace mxnet {
 namespace cpp {
@@ -178,7 +179,6 @@ inline RMSPropOptimizer::RMSPropOptimizer(unsigned begin_num_update)
   alex_update_handle_ = op_map()->GetSymbolCreator("rmspropalex_update");
   SetParam("gamma1", 0.9f);
   SetParam("gamma2", 0.9f);
-  //SetParam("centered", true);
   SetParam("epsilon", 1e-8);
 }
 
