@@ -35,7 +35,6 @@ inline mxnet::cpp::NDArray _sqrt(mxnet::cpp::NDArray data) {
 }
 
 }  // namespace
->>>>>>> lx/cpp-monitor
 
 namespace mxnet {
 namespace cpp {
