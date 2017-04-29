@@ -9,7 +9,8 @@
 
 using namespace mxnet::cpp;
 
-inline Symbol ConvFactory(Symbol data, int num_filter,
+inline Symbol ConvFactory(Symbol data,
+              int num_filter,
 						  Shape kernel,
 						  Shape stride = Shape(1, 1),
 						  Shape pad = Shape(0, 0),
@@ -33,7 +34,7 @@ Symbol Model(int patch_size)
 
 	std::vector<Symbol> conv;
 	conv.push_back(conv1);
-	for (int i = 2; i <= 13; ++i) {
+	for (int i = 2; i <= 19; ++i) {
 		std::string layerID = std::to_string(i);
 		Symbol convx = ConvFactory(conv.back(), 64, Shape(3, 3), Shape(1, 1), Shape(1, 1), layerID);
 		conv.push_back(convx);
@@ -46,7 +47,7 @@ Symbol Model(int patch_size)
   //auto pred = conv20;
   //auto diff = conv20;
 
-  auto l2 = sum("sum", diff*diff / (1.0f * patch_size * patch_size), Shape(2, 3)) ;
+  auto l2 = sum("sum", diff*diff / (2.0f * patch_size * patch_size), Shape(2, 3)) ;
 
   auto loss = MakeLoss(l2);
 
@@ -64,6 +65,7 @@ int main()
 	int patch_size = 41;
 	float learning_rate = 0.01;
 	float weight_decay = 1e-2;
+	//auto ctx = Context::cpu();
 	auto ctx = Context::gpu();
 	// auto ctx = Context::cpu();
 
@@ -79,16 +81,18 @@ int main()
 
 	auto initializer = Normal(0, sqrt(2.0 / 9.0 / 64.0));
 	for (auto &arg : args_map) {
-		if (arg.first.find('w')) {
+		if (arg.first.find('w') != std::string::npos) {
 			initializer(arg.first, &arg.second);
 		}
-		if (arg.first.find('b')) {
+		if (arg.first.find('b') != std::string::npos) {
 			Zero()(arg.first, &arg.second);
 		}
 	}
 
 	initializer = Normal(0, sqrt(2 / 9.0));
 	initializer("conv1_w", &(args_map["conv1_w"]));
+  //std::cout << args_map["conv1_w"] << std::endl;
+  //std::cout << args_map["conv20_w"] << std::endl;
 
 	// use grayscale 41x41 bmp
 	auto train_iter = MXDataIter("ImageRecordIter")
@@ -124,19 +128,25 @@ int main()
 		.CreateDataIter();
 
 	Optimizer* opt = OptimizerRegistry::Find("adam");
-	opt->SetParam("rescale_grad", 1.0 / batch_size);
+	opt->SetParam("rescale_grad", 1.0 / batch_size / patch_size / patch_size);
   /*
 	Optimizer* opt = OptimizerRegistry::Find("sgd");
 	opt->SetParam("rescale_grad", 1.0 / batch_size);
 	opt->SetParam("momentum", 0.9);
   */
   //opt->SetParam("clip_gradient", 100);
-  opt->SetParam("clip_gradient", 1);
+  //opt->SetParam("clip_gradient", 1);
 
-  Monitor mon(100, std::regex("_output|conv1_w"));
+  Monitor mon(100, std::regex("conv.*_output|conv.*_w"));
+  //Monitor shapemon(100, std::regex("conv.*_output|conv.*_w"), [](NDArray in) {
+  //std::vector<float> s; for (auto d : in.GetShape()) s.push_back(d); return NDArray( s, Shape(in.GetShape().size()), in.GetContext());
+  //    return Operator("sum").SetInput("data", in).Invoke()[0];
+  //});
+
   //Monitor mon(100);
   auto *exec = model.SimpleBind(ctx, args_map);
-  mon.install(exec);
+  //mon.install(exec);
+  //shapemon.install(exec);
 
 	for (int iter = 0; iter < max_epoch; ++iter) {
 		LG << "Epoch: " << iter;
@@ -146,7 +156,8 @@ int main()
 		train_iter.Reset();
 		train_label_iter.Reset();
 		while (train_iter.Next(), train_label_iter.Next()) {
-      mon.tic();
+      //mon.tic();
+      //shapemon.tic();
 			samples += batch_size;
 			auto data_batch = train_iter.GetDataBatch();
 			auto label_batch = train_label_iter.GetDataBatch();
@@ -159,11 +170,12 @@ int main()
 			exec->Forward(true);
 			exec->Backward();
 			exec->UpdateAll(opt, learning_rate, weight_decay);
+      //mon.toc_print();
+      //shapemon.toc_print();
 
 			if (samples % (100 * batch_size) == 0) {
 				LG << "Epoch:\t" << iter << " : " << samples;// << " Acc: " << acu.Get();
 			}
-      //mon.toc_print();
 		}
 
 		auto toc = std::chrono::system_clock::now();
