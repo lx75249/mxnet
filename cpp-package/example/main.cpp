@@ -15,36 +15,36 @@ namespace fs = std::experimental::filesystem;
 
 inline Symbol ConvFactory(Symbol data,
               int num_filter,
-						  Shape kernel,
-						  Shape stride = Shape(1, 1),
-						  Shape pad = Shape(0, 0),
-						  const string & name = "",
-						  bool relu = true)
+              Shape kernel,
+              Shape stride = Shape(1, 1),
+              Shape pad = Shape(0, 0),
+              const string & name = "",
+              bool relu = true)
 {
-	Symbol conv_w("conv" + name + "_w"), conv_b("conv" + name + "_b");
+  Symbol conv_w("conv" + name + "_w"), conv_b("conv" + name + "_b");
 
-	Symbol conv = Convolution("conv" + name, data,
-							  conv_w, conv_b, kernel,
-							  num_filter, stride, Shape(1, 1), pad);
-	return relu ? Activation("relu" + name, conv, ActivationActType::relu) : conv;
+  Symbol conv = Convolution("conv" + name, data,
+                conv_w, conv_b, kernel,
+                num_filter, stride, Shape(1, 1), pad);
+  return relu ? Activation("relu" + name, conv, ActivationActType::relu) : conv;
 }
 
 Symbol Model(int patch_size, int depth)
 {
-	Symbol data = Symbol::Variable("data");
-	Symbol data_label = Symbol::Variable("data_label");
+  Symbol data = Symbol::Variable("data");
+  Symbol data_label = Symbol::Variable("data_label");
 
-	auto conv1 = ConvFactory(data, 64, Shape(3, 3), Shape(1, 1), Shape(1, 1), "1");
+  auto conv1 = ConvFactory(data, 64, Shape(3, 3), Shape(1, 1), Shape(1, 1), "1");
 
-	vector<Symbol> conv;
-	conv.push_back(conv1);
-	for (int i = 2; i <= depth-1; ++i) {
-		string layerID = to_string(i);
-		Symbol convx = ConvFactory(conv.back(), 64, Shape(3, 3), Shape(1, 1), Shape(1, 1), layerID);
-		conv.push_back(convx);
-	}
+  vector<Symbol> conv;
+  conv.push_back(conv1);
+  for (int i = 2; i <= depth-1; ++i) {
+    string layerID = to_string(i);
+    Symbol convx = ConvFactory(conv.back(), 64, Shape(3, 3), Shape(1, 1), Shape(1, 1), layerID);
+    conv.push_back(convx);
+  }
 
-	auto conv20 = ConvFactory(conv.back(), 1, Shape(3, 3), Shape(1, 1), Shape(1, 1), to_string(depth), false);
+  auto conv20 = ConvFactory(conv.back(), 1, Shape(3, 3), Shape(1, 1), Shape(1, 1), to_string(depth), false);
 
   auto pred = conv20 + data;
   auto diff = pred - data_label;
@@ -56,10 +56,10 @@ Symbol Model(int patch_size, int depth)
   auto loss = MakeLoss(l2);
 
   return Symbol::Group({BlockGrad(pred), loss});
-	//auto res = broadcast_add("sum", data, conv20);
+  //auto res = broadcast_add("sum", data, conv20);
 
-	//return LinearRegressionOutput("output", res, data_label);
-	//return LinearRegressionOutput("output", conv20, data_label);
+  //return LinearRegressionOutput("output", res, data_label);
+  //return LinearRegressionOutput("output", conv20, data_label);
 }
 
 vector<pair<NDArray, NDArray>> ReadImages(vector<string> paths, int patch_size, int batch_size)
@@ -76,7 +76,7 @@ vector<pair<NDArray, NDArray>> ReadImages(vector<string> paths, int patch_size, 
     yuv.convertTo(float_mat, CV_32F, 1/255.0);
     cv::resize(float_mat, half_mat, cv::Size(0, 0), 0.5, 0.5, cv::INTER_CUBIC);
     cv::resize(half_mat, half_mat, float_mat.size(), 0, 0, cv::INTER_CUBIC);
-    
+
     assert(float_mat.channels() == 3);
     vector<cv::Mat> channels, half_channels;
     cv::split(float_mat, channels);
@@ -122,7 +122,8 @@ vector<pair<NDArray, NDArray>> ReadImages(vector<string> paths, int patch_size, 
 }
 
 pair<vector<string>, vector<string>> ListFolder(string folder, float ratio,
-    string suffix = ".png") {
+    string suffix = ".png")
+{
   vector<string> train, val;
   for (auto &entry : fs::directory_iterator(folder)) {
     string name = entry.path().string();
@@ -141,12 +142,12 @@ pair<vector<string>, vector<string>> ListFolder(string folder, float ratio,
 int main(int argc, char *argv[])
 {
   int depth = 22;
-	int batch_size = 48;
-	int max_epoch = 250;
-	int patch_size = 128;
-	float learning_rate = 0.00001;
-	float weight_decay = 1e-4;
-	auto ctx = Context::gpu(3);
+  int batch_size = 48;
+  int max_epoch = 250;
+  int patch_size = 128;
+  float learning_rate = 0.00001;
+  float weight_decay = 1e-4;
+  auto ctx = Context::gpu(3);
 
   string param_str = "d" + to_string(depth) + "p" + to_string(patch_size);
 
@@ -155,14 +156,14 @@ int main(int argc, char *argv[])
   auto train_data = ReadImages(train_paths, patch_size, batch_size);
   auto val_data = ReadImages(val_paths, patch_size, batch_size);
 
-	auto model = Model(patch_size, depth);
-	map<string, NDArray> args_map;
+  auto model = Model(patch_size, depth);
+  map<string, NDArray> args_map;
 
-	args_map["data"] = NDArray(Shape(batch_size, 1, patch_size, patch_size), ctx, false);
-	args_map["data_label"] = NDArray(Shape(batch_size, 1, patch_size, patch_size), ctx, false);
-	model.InferArgsMap(ctx, &args_map, args_map);
+  args_map["data"] = NDArray(Shape(batch_size, 1, patch_size, patch_size), ctx, false);
+  args_map["data_label"] = NDArray(Shape(batch_size, 1, patch_size, patch_size), ctx, false);
+  model.InferArgsMap(ctx, &args_map, args_map);
 
-	model.Save("vdsr." + param_str + ".model");
+  model.Save("vdsr." + param_str + ".model");
 
   int start_iter = 0;
   if (argc == 1) {
@@ -186,10 +187,10 @@ int main(int argc, char *argv[])
     NDArray::Load(param_name, nullptr, &args_map);
   }
 
-	// use grayscale 41x41 bmp
+  // use grayscale 41x41 bmp
 
-	Optimizer* opt = OptimizerRegistry::Find("adam");
-	opt->SetParam("rescale_grad", 1.0 / batch_size);
+  Optimizer* opt = OptimizerRegistry::Find("adam");
+  opt->SetParam("rescale_grad", 1.0 / batch_size);
 
   Monitor mon(100, regex("conv.*_output|conv.*_w"));
   //Monitor shapemon(100, regex("conv.*_output|conv.*_w"), [](NDArray in) {
@@ -203,62 +204,62 @@ int main(int argc, char *argv[])
   //mon.install(exec);
   //shapemon.install(exec);
 
-	for (int iter = start_iter; iter < max_epoch; ++iter) {
-		LG << "Epoch: " << iter;
-		auto tic = chrono::system_clock::now();
-		int samples = 0;
+  for (int iter = start_iter; iter < max_epoch; ++iter) {
+    LG << "Epoch: " << iter;
+    auto tic = chrono::system_clock::now();
+    int samples = 0;
 
     PSNR train_psnr;
     for (auto& data : train_data) {
       //mon.tic();
       //shapemon.tic();
-			samples += batch_size;
-			data.first.CopyTo(&args_map["data"]);
-			data.second.CopyTo(&args_map["data_label"]);
-			NDArray::WaitAll();
+      samples += batch_size;
+      data.first.CopyTo(&args_map["data"]);
+      data.second.CopyTo(&args_map["data_label"]);
+      NDArray::WaitAll();
 
-			exec->Forward(true);
-			exec->Backward();
-			exec->UpdateAll(opt, learning_rate, weight_decay);
+      exec->Forward(true);
+      exec->Backward();
+      exec->UpdateAll(opt, learning_rate, weight_decay);
       train_psnr.Update(data.second, exec->outputs[0]);
       //mon.toc_print();
       //shapemon.toc_print();
 
-			if (samples % (100 * batch_size) == 0) {
-				LG << "Epoch:\t" << iter << " : " << samples << " PSNR: " << train_psnr.Get();
-			}
-		}
+      if (samples % (100 * batch_size) == 0) {
+        LG << "Epoch:\t" << iter << " : " << samples << " PSNR: " << train_psnr.Get();
+      }
+    }
 
-		auto toc = chrono::system_clock::now();
+    auto toc = chrono::system_clock::now();
 
-		PSNR acu, data_ac;
-		if (1) {
+    PSNR acu, data_ac;
+    if (1) {
       for (auto &data : val_data) {
-				data.first.CopyTo(&args_map["data"]);
-				data.second.CopyTo(&args_map["data_label"]);
-				NDArray::WaitAll();
+        data.first.CopyTo(&args_map["data"]);
+        data.second.CopyTo(&args_map["data_label"]);
+        NDArray::WaitAll();
 
-				exec->Forward(false);
-				NDArray::WaitAll();
-				acu.Update(data.second, exec->outputs[0]);
-				data_ac.Update(data.first, data.second);
-			}
-		}
+        exec->Forward(false);
+        NDArray::WaitAll();
+        acu.Update(data.second, exec->outputs[0]);
+        data_ac.Update(data.first, data.second);
+      }
+    }
 
-		string save_path_param = "./vdsr_" + param_str + "_param_" + to_string(iter);
-		auto save_args = args_map;
-		save_args.erase(save_args.find("data"));
-		save_args.erase(save_args.find("data_label"));
-		LG << "ITER:\t" << iter << " Saving to..." << save_path_param;
-		NDArray::Save(save_path_param, save_args);
+    string save_path_param = "./vdsr_" + param_str + "_param_" + to_string(iter);
+    auto save_args = args_map;
+    save_args.erase(save_args.find("data"));
+    save_args.erase(save_args.find("data_label"));
+    LG << "ITER:\t" << iter << " Saving to..." << save_path_param;
+    NDArray::Save(save_path_param, save_args);
 
-		float duration = chrono::duration_cast<chrono::milliseconds>(toc - tic).count() / 1000.0;
-		LG << "Epoch:\t" << iter << " "
-			<< samples / duration * patch_size * patch_size
-			<< " pixel/sec in "
-			<< duration << "s PSNR: " << acu.Get() << "/" << data_ac.Get();
-	}
+    float duration = chrono::duration_cast<chrono::milliseconds>(toc - tic).count() / 1000.0;
+    LG << "Epoch:\t" << iter << " "
+      << samples / duration * patch_size * patch_size
+      << " pixel/sec in "
+      << duration << "s PSNR: " << acu.Get() << "/" << data_ac.Get();
+  }
 
-	MXNotifyShutdown();
-	return 0;
+  MXNotifyShutdown();
+  return 0;
 }

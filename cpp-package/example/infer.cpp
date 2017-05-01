@@ -11,20 +11,20 @@ using namespace std;
 
 int main(int argc, char *argv[])
 {
-	int batch_size = 1;
-	int depth = stoi(argv[2]);
-	int patch_size = stoi(argv[3]);
+  int batch_size = 1;
+  int depth = stoi(argv[2]);
+  int patch_size = stoi(argv[3]);
   string param_str = "d" + to_string(depth) + "p" + to_string(patch_size);
   string param_name = "vdsr_" + param_str + "_param_" + argv[4];
-	auto ctx = Context::gpu(3);
+  auto ctx = Context::gpu(3);
   string path = argv[1];
 
-	auto model = Symbol::Load("vdsr." + param_str + ".model");
-	std::map<std::string, NDArray> args_map;
+  auto model = Symbol::Load("vdsr." + param_str + ".model");
+  std::map<std::string, NDArray> args_map;
 
-	args_map["data"] = NDArray(Shape(batch_size, 1, patch_size, patch_size), ctx, false);
-	args_map["data_label"] = NDArray(Shape(batch_size, 1, patch_size, patch_size), ctx, false);
-	model.InferArgsMap(ctx, &args_map, args_map);
+  args_map["data"] = NDArray(Shape(batch_size, 1, patch_size, patch_size), ctx, false);
+  args_map["data_label"] = NDArray(Shape(batch_size, 1, patch_size, patch_size), ctx, false);
+  model.InferArgsMap(ctx, &args_map, args_map);
 
   NDArray::Load(param_name, nullptr, &args_map);
 
@@ -112,6 +112,6 @@ int main(int argc, char *argv[])
   output_float.convertTo(output_image, CV_8U, 255.0);
   cv::imwrite("half.png", output_image, {CV_IMWRITE_PNG_COMPRESSION, 0});
 
-	MXNotifyShutdown();
-	return 0;
+  MXNotifyShutdown();
+  return 0;
 }
