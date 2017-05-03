@@ -145,7 +145,7 @@ int main(int argc, char *argv[])
   int batch_size = 48;
   int max_epoch = 250;
   int patch_size = 128;
-  float learning_rate = 0.00001;
+  float learning_rate = 0.000001;
   float weight_decay = 1e-4;
   auto ctx = Context::gpu(3);
 

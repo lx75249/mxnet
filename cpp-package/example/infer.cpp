@@ -38,8 +38,8 @@ int main(int argc, char *argv[])
   cv::cvtColor(origin, yuv, cv::COLOR_BGR2YUV);
   cv::Mat float_mat, half_mat;
   yuv.convertTo(float_mat, CV_32F, 1/255.0);
-  cv::resize(float_mat, half_mat, cv::Size(0, 0), 0.5, 0.5, cv::INTER_CUBIC);
-  cv::resize(half_mat, half_mat, float_mat.size(), 0, 0, cv::INTER_CUBIC);
+  cv::resize(float_mat, half_mat, cv::Size(0, 0), 2, 2, cv::INTER_CUBIC);
+  //cv::resize(half_mat, half_mat, float_mat.size(), 0, 0, cv::INTER_CUBIC);
   
   assert(float_mat.channels() == 3);
   vector<cv::Mat> channels, half_channels;
@@ -49,13 +49,46 @@ int main(int argc, char *argv[])
   cv::Mat half_img = half_channels[0];
   cv::Mat result(half_img.size(), CV_32F);
   cv::Mat overlap(half_img.size(), CV_32F);
-  auto shape = image.size();
+  auto shape = half_img.size();
   int w = shape.width;
   int h = shape.height;
   PSNR acu;
-  for (int i = 0; i + patch_size <= w; i += patch_size/4) {
-    for (int j = 0; j + patch_size <= h; j += patch_size/4) {
-      auto patch = image({i, j, patch_size, patch_size});
+  for (int i = 0; i + patch_size <= w; i += patch_size/2) {
+    for (int j = 0; j + patch_size <= h; j += patch_size/2) {
+      auto patch = half_img({i, j, patch_size, patch_size});
+      for (int r = 0; r < patch.rows; ++r) {
+        label_buf.insert(label_buf.end(),
+            patch.ptr<float>(r), patch.ptr<float>(r)+patch.cols);
+      }
+
+      auto half_patch = half_img({i, j, patch_size, patch_size});
+      for (int r = 0; r < half_patch.rows; ++r) {
+        data_buf.insert(data_buf.end(),
+            half_patch.ptr<float>(r), half_patch.ptr<float>(r)+half_patch.cols);
+      }
+
+      NDArray label(label_buf, Shape(batch_size, 1, patch_size, patch_size), ctx);
+      NDArray resi(data_buf, Shape(batch_size, 1, patch_size, patch_size), ctx);
+      resi.CopyTo(&args_map["data"]);
+      label.CopyTo(&args_map["data_label"]);
+      
+      NDArray::WaitAll();
+      exec->Forward(false);
+      exec->outputs[0].SyncCopyToCPU(&data_buf);
+      acu.Update(label, exec->outputs[0]);
+      cv::Mat waifu(patch_size, patch_size, CV_32F, data_buf.data());
+
+      //waifu.copyTo(result({i, j, patch_size, patch_size}));
+      result({i, j, patch_size, patch_size}) += waifu;
+      overlap({i, j, patch_size, patch_size}) += 1.0f;
+
+      label_buf.clear();
+      data_buf.clear();
+    }
+  }
+  for (int i = w-patch_size; i >= 0; i -= patch_size/2) {
+    for (int j = h-patch_size; j >= 0; j -= patch_size/2) {
+      auto patch = half_img({i, j, patch_size, patch_size});
       for (int r = 0; r < patch.rows; ++r) {
         label_buf.insert(label_buf.end(),
             patch.ptr<float>(r), patch.ptr<float>(r)+patch.cols);
@@ -87,12 +120,7 @@ int main(int argc, char *argv[])
     }
   }
 
-  for (int x = 0; x + patch_size/4 <= w; x += patch_size/4) {
-    for (int y = 0; y + patch_size/4 <= h; y += patch_size/4) {
-      result({x, y, patch_size/4, patch_size/4}) /=
-        overlap({x, y, patch_size/4, patch_size/4});
-    }
-  }
+  result /= overlap;
 
   LG << acu.Get();
 
