@@ -1,7 +1,7 @@
 CPPEX_SRC = $(wildcard *.cpp)
 CPPEX_EXE = $(patsubst %.cpp, %, $(CPPEX_SRC))
 
-CFLAGS += -I../../include -I../../nnvm/include -I../../dmlc-core/include
+CFLAGS += -I../../include -I../../nnvm/include -I../../dmlc-core/include -DDMLC_LOG_FATAL_THROW=0 -g
 CPPEX_CFLAGS += -I../include
 CPPEX_EXTRA_LDFLAGS := -L. -lmxnet `pkg-config --libs opencv` -lstdc++fs
 
