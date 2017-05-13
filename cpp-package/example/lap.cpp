@@ -2,6 +2,8 @@
 #include <opencv2/opencv.hpp>
 
 #include <array>
+#include <thread>
+#include <condition_variable>
 #include <string>
 #include <vector>
 #include <map>
@@ -103,65 +105,85 @@ template <int N = 1>
 std::vector<std::array<NDArray, N+1>> ReadImages(std::vector<std::string> paths, int patch_size, int batch_size)
 {
   std::vector<std::array<NDArray, N+1>> results;
-  std::array<std::vector<float>, N+1> bufs;
-  for (int i = 0; i <= N; ++i) {
-    bufs[i].reserve(batch_size * patch_size * patch_size << (2*i));
-  }
-
-  int batch = 0;
-  for (auto& path : paths) {
-    cv::Mat origin = cv::imread(path);
-    cv::Mat yuv;
-    cv::cvtColor(origin, yuv, cv::COLOR_BGR2YUV);
-    cv::Mat mat;
-
-    yuv.convertTo(mat, CV_32F, 1 / 255.0);
-    assert(mat.channels() == 3);
-
-    std::array<cv::Mat, N+1> scaled_mats;
-
-    std::vector<cv::Mat> channels;
+  std::mutex mutex;
+  auto read_thread = [patch_size, batch_size, &results, &mutex](std::vector<std::string> paths) {
+    int batch = 0;
+    std::array<std::vector<float>, N+1> bufs;
     for (int i = 0; i <= N; ++i) {
-      float scale = 1.0f / (1 << (N-i));
-      cv::Mat scaled_mat;
-      cv::resize(mat, scaled_mat, cv::Size(0, 0), scale, scale, cv::INTER_CUBIC);
-      channels.clear();
-      cv::split(scaled_mat, channels);
-      scaled_mats[i] = channels[0];
+      bufs[i].reserve(batch_size * patch_size * patch_size << (2*i));
     }
 
-    auto shape = scaled_mats[0].size();
-    int w = shape.width;
-    int h = shape.height;
-    int count = 0;
-    for (int i = 0; i + patch_size <= w; i += patch_size) {
-      for (int j = 0; j + patch_size <= h; j += patch_size) {
-        ++batch;
-        for (int s = 0; s <= N; ++s) {
-          auto patch = scaled_mats[s]({ i << s, j << s, patch_size << s, patch_size << s });
-          for (int r = 0; r < patch.rows; ++r) {
-            bufs[s].insert(bufs[s].end(),
-                patch.template ptr<float>(r),
-                patch.template ptr<float>(r) + patch.cols);
-          }
-        }
+    for (auto& path : paths) {
+      cv::Mat origin = cv::imread(path);
+      cv::Mat yuv;
+      cv::cvtColor(origin, yuv, cv::COLOR_BGR2YUV);
+      cv::Mat mat;
 
-        if (batch == batch_size) {
-          std::array<NDArray, N+1> data_batch;
-          for (int s = 0; s <= N; ++s) {
-            data_batch[s] = NDArray(bufs[s],
-                Shape(batch_size, 1, patch_size<<s, patch_size<<s),
-                Context::cpu());
-            bufs[s].clear();
-          }
-          results.push_back(std::move(data_batch));
-          batch = 0;
-        }
-        ++count;
+      yuv.convertTo(mat, CV_32F, 1 / 255.0);
+      assert(mat.channels() == 3);
+
+      std::array<cv::Mat, N+1> scaled_mats;
+
+      std::vector<cv::Mat> channels;
+      for (int i = 0; i <= N; ++i) {
+        float scale = 1.0f / (1 << (N-i));
+        cv::Mat scaled_mat;
+        cv::resize(mat, scaled_mat, cv::Size(0, 0), scale, scale, cv::INTER_CUBIC);
+        channels.clear();
+        cv::split(scaled_mat, channels);
+        scaled_mats[i] = channels[0];
       }
+
+      auto shape = scaled_mats[0].size();
+      int w = shape.width;
+      int h = shape.height;
+      int count = 0;
+      for (int i = 0; i + patch_size <= w; i += patch_size) {
+        for (int j = 0; j + patch_size <= h; j += patch_size) {
+          ++batch;
+          for (int s = 0; s <= N; ++s) {
+            auto patch = scaled_mats[s]({ i << s, j << s, patch_size << s, patch_size << s });
+            for (int r = 0; r < patch.rows; ++r) {
+              bufs[s].insert(bufs[s].end(),
+                  patch.template ptr<float>(r),
+                  patch.template ptr<float>(r) + patch.cols);
+            }
+          }
+
+          if (batch == batch_size) {
+            std::array<NDArray, N+1> data_batch;
+            for (int s = 0; s <= N; ++s) {
+              data_batch[s] = NDArray(bufs[s],
+                  Shape(batch_size, 1, patch_size<<s, patch_size<<s),
+                  Context::cpu());
+              bufs[s].clear();
+            }
+            {
+              std::lock_guard<std::mutex> guard(mutex);
+              results.push_back(std::move(data_batch));
+            }
+            batch = 0;
+          }
+          ++count;
+        }
+      }
+      std::cerr << "\33[2K\rSplit " << path << " into " << count << " patches";
     }
-    std::cerr << "\33[2K\rSplit " << path << " into " << count << " patches";
+  };
+
+  const int num_threads = std::min(std::thread::hardware_concurrency(), 8U);
+  std::vector<std::thread> threads;
+  for (int i = 0; i < num_threads; ++i) {
+    int piece = (paths.size() + num_threads - 1) / num_threads;
+    auto begin = paths.begin() + piece * i;
+    auto end = (i == num_threads-1) ? paths.end() : begin + piece;
+    threads.emplace_back(read_thread, std::vector<std::string>(begin, end));
   }
+
+  for (auto& thread : threads) {
+    thread.join();
+  }
+
   std::cerr << "\33[2K\rTotal patches: " << results.size() << "*" << batch_size
     << " = " << results.size() * batch_size << std::endl;
   return results;
@@ -199,7 +221,7 @@ int main(int argc, char *argv[])
   std::string param_str = "d" + std::to_string(depth) + "p" + std::to_string(patch_size);
 
   std::vector<std::string> train_paths, val_paths;
-  std::tie(train_paths, val_paths) = ListFolder("/data/xlidc/png", 0.9);
+  std::tie(train_paths, val_paths) = ListFolder("/home/data/xlidc/png", 0.9);
   auto train_data = ReadImages<level>(train_paths, patch_size, batch_size);
   auto val_data = ReadImages<level>(val_paths, patch_size, batch_size);
 
@@ -228,7 +250,7 @@ int main(int argc, char *argv[])
   int start_iter = 0;
   if (argc == 1) {
     LG << "Training from scratch";
-    auto initializer = Normal(0, sqrt(2.0 / (9.0 * patch_size)));
+    auto initializer = Normal(0, sqrt(2.0 / (9.0 * patch_size * patch_size)));
     for (auto &arg : args_map) {
       if (arg.first.find('w') != std::string::npos) {
         initializer(arg.first, &arg.second);
@@ -266,14 +288,14 @@ int main(int argc, char *argv[])
     auto tic = std::chrono::system_clock::now();
     int samples = 0;
 
-    DiffError train_psnr;
+    PSNR train_psnr;
     for (auto& data : train_data) {
       //mon.tic();
       //shapemon.tic();
       samples += batch_size;
       data.front().CopyTo(&args_map["data"]);
       for (int i = 1; i <= level; ++i) {
-        data[i].CopyTo(&args_map["data_label_x" + std::to_string(2<<i)]);
+        data[i].CopyTo(&args_map["data_label_x" + std::to_string(1<<i)]);
       }
       NDArray::WaitAll();
 
@@ -291,12 +313,13 @@ int main(int argc, char *argv[])
 
     auto toc = std::chrono::system_clock::now();
 
-    DiffError acu, data_ac;
+    std::cerr << "Validating..." << std::endl;
+    PSNR acu, data_ac;
     if (1) {
       for (auto &data : val_data) {
         data.front().CopyTo(&args_map["data"]);
         for (int i = 1; i <= level; ++i) {
-          data[i].CopyTo(&args_map["data_label_x" + std::to_string(2<<i)]);
+          data[i].CopyTo(&args_map["data_label_x" + std::to_string(1<<i)]);
         }
         NDArray::WaitAll();
 
@@ -310,7 +333,9 @@ int main(int argc, char *argv[])
     std::string save_path_param = "./lapsrn_" + param_str + "_param_" + std::to_string(iter);
     auto save_args = args_map;
     save_args.erase(save_args.find("data"));
-    save_args.erase(save_args.find("data_label"));
+    for (int i = 1; i <= level; ++i) {
+      save_args.erase(save_args.find("data_label_x" + std::to_string(1<<i)));
+    }
     LG << "ITER:\t" << iter << " Saving to..." << save_path_param;
     NDArray::Save(save_path_param, save_args);
 
@@ -318,7 +343,7 @@ int main(int argc, char *argv[])
     LG << "Epoch:\t" << iter << " "
       << samples / duration * patch_size * patch_size
       << " pixel/sec in "
-      << duration << "s PSNR: " << acu.Get() << "/" << data_ac.Get();
+      << duration << "s PSNR: " << acu.Get() ;//<< "/" << data_ac.Get();
   }
 
   MXNotifyShutdown();
