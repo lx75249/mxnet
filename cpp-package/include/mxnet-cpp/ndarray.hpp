@@ -227,6 +227,30 @@ inline void NDArray::Load(const std::string &file_name,
     }
   }
 }
+inline void NDArray::Load(const std::string &file_name,
+                          Context context,
+                          std::vector<NDArray> *array_list,
+                          std::map<std::string, NDArray> *array_map) {
+  mx_uint out_size, out_name_size;
+  NDArrayHandle *out_arr;
+  const char **out_names;
+  int dev_type = context.GetDeviceType();
+  int dev_id = context.GetDeviceId();
+  CHECK_EQ(MXNDArrayLoadToContext(file_name.c_str(), &out_size, &out_arr,
+        &out_name_size, &out_names, &dev_type, &dev_id),
+           0);
+  if (array_list != nullptr) {
+    for (mx_uint i = 0; i < out_size; ++i) {
+      array_list->push_back(NDArray(out_arr[i]));
+    }
+  }
+  if (array_map != nullptr && out_name_size > 0) {
+    CHECK_EQ(out_name_size, out_size);
+    for (mx_uint i = 0; i < out_size; ++i) {
+      (*array_map)[out_names[i]] = NDArray(out_arr[i]);
+    }
+  }
+}
 inline std::map<std::string, NDArray> NDArray::LoadToMap(
     const std::string &file_name) {
   std::map<std::string, NDArray> array_map;

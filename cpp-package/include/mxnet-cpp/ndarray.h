@@ -350,6 +350,19 @@ class NDArray {
                    std::vector<NDArray> *array_list = nullptr,
                    std::map<std::string, NDArray> *array_map = nullptr);
   /*!
+  * \brief Load NDArrays from binary file into specified context.
+  * \param file_name name of the binary file.
+  * \param context the context to load into.
+  * \param array_list a list of NDArrays returned, do not fill the list if
+  * nullptr is given.
+  * \param array_map a map from names to NDArrays returned, do not fill the map
+  * if nullptr is given or no names is stored in binary file.
+  */
+  static void Load(const std::string &file_name,
+                   Context context,
+                   std::vector<NDArray> *array_list = nullptr,
+                   std::map<std::string, NDArray> *array_map = nullptr);
+  /*!
   * \brief Load map of NDArrays from binary file.
   * \param file_name name of the binary file.
   * \return a list of NDArrays.

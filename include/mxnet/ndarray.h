@@ -183,6 +183,13 @@ class NDArray {
    */
   bool Load(dmlc::Stream *strm);
   /*!
+   * \brief load the content from binary stream into specified context
+   * \param strm the output stream
+   * \param ctx the context to load into
+   * \return whether the load is successful
+   */
+  bool Load(dmlc::Stream *strm, Context ctx);
+  /*!
    * \brief set all the elements in ndarray to be scalar
    * \param scalar the scalar to set
    * \return reference of self

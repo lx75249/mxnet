@@ -639,15 +639,19 @@ void NDArray::Save(dmlc::Stream *strm) const {
 }
 
 bool NDArray::Load(dmlc::Stream *strm) {
+  // load context
+  Context ctx;
+  if (!ctx.Load(strm)) return false;
+  return Load(strm, ctx);
+}
+
+bool NDArray::Load(dmlc::Stream *strm, Context ctx) {
   // load shape
   TShape shape;
   if (!shape.Load(strm)) return false;
   if (shape.ndim() == 0) {
     *this = NDArray(); return true;
   }
-  // load context
-  Context ctx;
-  if (!ctx.Load(strm)) return false;
   // load type flag
   int32_t type_flag;
   if (strm->Read(&type_flag, sizeof(type_flag)) != sizeof(type_flag)) return false;

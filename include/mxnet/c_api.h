@@ -288,6 +288,24 @@ MXNET_DLL int MXNDArrayLoad(const char* fname,
                             mx_uint *out_name_size,
                             const char*** out_names);
 /*!
+ * \brief Load list of narray from the file into the specified context
+ * \param fname name of the file.
+ * \param out_size number of narray loaded.
+ * \param out_arr head of the returning narray handles.
+ * \param out_name_size size of output name arrray.
+ * \param out_names the names of returning NDArrays, can be NULL
+ * \param dev_type the device type of the context
+ * \param dev_id the device id of the context
+ * \return 0 when success, -1 when failure happens
+ */
+MXNET_DLL int MXNDArrayLoadToContext(const char* fname,
+                            mx_uint *out_size,
+                            NDArrayHandle** out_arr,
+                            mx_uint *out_name_size,
+                            const char*** out_names,
+                            int dev_type DEFAULT(-1),
+                            int dev_id DEFAULT(-1));
+/*!
  * \brief Perform a synchronize copy from a continugous CPU memory region.
  *
  *  This function will call WaitToWrite before the copy is performed.

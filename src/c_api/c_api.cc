@@ -236,6 +236,17 @@ int MXNDArrayLoad(const char* fname,
                   NDArrayHandle** out_arr,
                   mx_uint *out_name_size,
                   const char*** out_names) {
+  MXNDArrayLoadToContext(fname, out_size, out_arr, out_name_size, out_names,
+      nullptr, nullptr);
+}
+
+int MXNDArrayLoadToContext(const char* fname,
+                           mx_uint *out_size,
+                           NDArrayHandle** out_arr,
+                           mx_uint *out_name_size,
+                           const char*** out_names,
+                           int dev_type,
+                           int dev_id) {
   MXAPIThreadLocalEntry *ret = MXAPIThreadLocalStore::Get();
   ret->ret_vec_str.clear();
   API_BEGIN();
@@ -243,7 +254,11 @@ int MXNDArrayLoad(const char* fname,
   std::vector<std::string> &names = ret->ret_vec_str;
   {
     std::unique_ptr<dmlc::Stream> fi(dmlc::Stream::Create(fname, "r"));
-    mxnet::NDArray::Load(fi.get(), &data, &names);
+    if (dev_type == -1) {
+      mxnet::NDArray::Load(fi.get(), &data, &names);
+    } else {
+      mxnet::NDArray::Load(fi.get(), &data, &names, Context::Create(dev_type, dev_id));
+    }
   }
   ret->ret_handles.resize(data.size());
   for (size_t i = 0; i < data.size(); ++i) {
