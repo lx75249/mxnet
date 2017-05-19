@@ -78,14 +78,14 @@ Symbol Modelx4(int depth = 10, int depthx2 = 0)
   auto convR1 = ConvFactory(convF1, 1, Shape(3, 3), Shape(1, 1), Shape(1, 1), "R1", false);
   auto HRx2 = convI1 + convR1; // x2
   auto R2 = label_x2 - HRx2;
-  auto L1 = sum("sum1", sqrt(R2*R2 + 1e-3*1e-3), Shape(2, 3));
+  auto L1 = sum("sum1", sqrt(square(R2)+ 1e-3*1e-3), Shape(2, 3));
 
   auto convF2 = FeatureExtFactory(convF1, 2, depth);
   auto convI2 = ConvTranspose(HRx2, 1, 2, "I2", false);
   auto convR2 = ConvFactory(convF2, 1, Shape(3, 3), Shape(1, 1), Shape(1, 1), "R2", false);
   auto HRx4 = convI2 + convR2; // x4
   auto R4 = label_x4 - HRx4;
-  auto L2 = sum("sum2", sqrt(R4*R4 + 1e-3*1e-3), Shape(2, 3));
+  auto L2 = sum("sum2", sqrt(square(R4) + 1e-3*1e-3), Shape(2, 3));
 
   //auto convF3 = FeatureExtFactory(convF2, 3, 5);
   //auto convI3 = ConvTranspose(HRx4, 1, 2, "I3");
@@ -228,8 +228,6 @@ int main(int argc, char *argv[])
 
   KVStore::SetType("local");
 
-  //std::vector<std::thread> threads;
-  //num_train_threads = ctxs.size();
   std::vector<std::map<std::string, NDArray>> args_maps;
   std::vector<Symbol> models;
 
@@ -324,7 +322,6 @@ int main(int argc, char *argv[])
           exec->grad_arrays[i].CopyTo(&grad);
           KVStore::Push(arg_keys[i], grad);
         }
-        //KVStore::Push(arg_keys, exec->grad_arrays);
 
         //exec->UpdateAll(opt, learning_rate, weight_decay);
         //train_psnr.Update(data[1], exec->outputs[0]);
@@ -336,8 +333,7 @@ int main(int argc, char *argv[])
       }
     }
 
-    auto toc = std::chrono::system_clock::now();
-
+    /*
     LG << "Validating...";
     PSNR acu, data_ac;
     for (auto &data : val_data) {
@@ -351,35 +347,27 @@ int main(int argc, char *argv[])
       acu.Update(data[1], execs[0]->outputs[0]);
       //data_ac.Update(data.front, data.second);
     }
+    */
 
-    std::string save_path_param = "./lapsrn_" + param_str + "_param_" + std::to_string(iter);
-    auto save_args = args_maps[0];
-    save_args.erase(save_args.find("data"));
-    for (int i = 1; i <= level; ++i) {
-      save_args.erase(save_args.find("data_label_x" + std::to_string(1<<i)));
+    if (iter%5 == 0) {
+      std::string save_path_param = "./lapsrn_" + param_str + "_param_" + std::to_string(iter);
+      auto save_args = args_maps[0];
+      save_args.erase(save_args.find("data"));
+      for (int i = 1; i <= level; ++i) {
+        save_args.erase(save_args.find("data_label_x" + std::to_string(1<<i)));
+      }
+      LG << "ITER:\t" << iter << " Saving to..." << save_path_param;
+      NDArray::Save(save_path_param, save_args);
     }
-    LG << "ITER:\t" << iter << " Saving to..." << save_path_param;
-    NDArray::Save(save_path_param, save_args);
+    auto toc = std::chrono::system_clock::now();
 
     float duration = std::chrono::duration_cast<std::chrono::milliseconds>(toc - tic).count() / 1000.0;
     LG << "Epoch:\t" << iter << " "
       << samples / duration * patch_size * patch_size
       << " pixel/sec in "
-      << duration << "s PSNR: " << acu.Get() ;//<< "/" << data_ac.Get();
+      << duration;
+      //<< "s PSNR: " << acu.Get() ;//<< "/" << data_ac.Get();
   }
-    /*
-  for (size_t i = 0; i < ctxs.size(); ++i) {
-    int piece = (train_data.size() + ctxs.size() - 1) / ctxs.size();
-    auto begin = train_data.cbegin() + i * piece;
-    auto end = (i + 1 == ctxs.size()) ? train_data.cend() : begin + piece;
-    threads.emplace_back(train_thread, threads.size(), ctxs[i],
-        begin, end, val_data, argc, argv);
-  }
-
-  for (auto& thread : threads) {
-    thread.join();
-  }
-        */
 
   MXNotifyShutdown();
   return 0;
