@@ -78,14 +78,14 @@ Symbol Modelx4(int depth = 10, int depthx2 = 0)
   auto convR1 = ConvFactory(convF1, 1, Shape(3, 3), Shape(1, 1), Shape(1, 1), "R1", false);
   auto HRx2 = convI1 + convR1; // x2
   auto R2 = label_x2 - HRx2;
-  auto L1 = sum("sum1", sqrt(square(R2) + 1e-3*1e-3), Shape(2, 3));
+  auto L1 = sum("sum1", sqrt(R2*R2 + 1e-3*1e-3), Shape(2, 3));
 
   auto convF2 = FeatureExtFactory(convF1, 2, depth);
   auto convI2 = ConvTranspose(HRx2, 1, 2, "I2", false);
   auto convR2 = ConvFactory(convF2, 1, Shape(3, 3), Shape(1, 1), Shape(1, 1), "R2", false);
   auto HRx4 = convI2 + convR2; // x4
   auto R4 = label_x4 - HRx4;
-  auto L2 = sum("sum2", sqrt(square(R4) + 1e-3*1e-3), Shape(2, 3));
+  auto L2 = sum("sum2", sqrt(R4*R4 + 1e-3*1e-3), Shape(2, 3));
 
   //auto convF3 = FeatureExtFactory(convF2, 3, 5);
   //auto convI3 = ConvTranspose(HRx4, 1, 2, "I3");
@@ -214,40 +214,49 @@ const int max_epoch = 100;
 const int patch_size = 16;
 const float learning_rate = 0.0001;
 const float weight_decay = 1e-4;
-int num_train_threads;
 
-std::mutex param_init_mutex, push_mutex;
-std::condition_variable param_init_cv;
-
-void train_thread(int id, Context ctx,
-    std::vector<std::array<NDArray, level+1>>::const_iterator train_begin,
-    std::vector<std::array<NDArray, level+1>>::const_iterator train_end,
-    const std::vector<std::array<NDArray, level+1>> &val_data,
-    int argc, char* argv[])
+int main(int argc, char *argv[])
 {
-  auto model = Modelx4(patch_size, depth);
-  std::map<std::string, NDArray> args_map;
-  args_map["data"] = NDArray(Shape(batch_size, 1, patch_size, patch_size), ctx);
-  for (int i = 0; i < level; ++i) {
-    int scale = 2 << i;
-    args_map["data_label_x" + std::to_string(scale)] =
-      NDArray(Shape(batch_size, 1, patch_size * scale, patch_size * scale), ctx);
-  }
+  const std::vector<Context> ctxs{
+    Context::gpu(0), Context::gpu(1), Context::gpu(2), Context::gpu(3)};
 
-  model.InferArgsMap(ctx, &args_map, args_map);
+  std::vector<std::string> train_paths, val_paths;
+  std::tie(train_paths, val_paths) = ListFolder("/data/xlidc/png", 0.9);
+
+  auto train_data = ReadImages<level>(train_paths, patch_size, batch_size);
+  auto val_data = ReadImages<level>(val_paths, patch_size, batch_size);
+
+  KVStore::SetType("local");
+
+  //std::vector<std::thread> threads;
+  //num_train_threads = ctxs.size();
+  std::vector<std::map<std::string, NDArray>> args_maps;
+  std::vector<Symbol> models;
+
+  for (auto& ctx : ctxs) {
+    models.push_back(Modelx4(patch_size, depth));
+    std::map<std::string, NDArray> args_map;
+    args_map["data"] = NDArray(Shape(batch_size, 1, patch_size, patch_size), ctx);
+    for (int i = 0; i < level; ++i) {
+      int scale = 2 << i;
+      args_map["data_label_x" + std::to_string(scale)] =
+        NDArray(Shape(batch_size, 1, patch_size * scale, patch_size * scale), ctx);
+    }
+    models.back().InferArgsMap(ctx, &args_map, args_map);
+    args_maps.push_back(std::move(args_map));
+  }
 
   std::string param_str = "d" + std::to_string(depth) + "p" + std::to_string(patch_size);
 
-
   int start_iter = argc == 1 ? 0 : std::stoi(argv[1]) + 1;
 
-  if (id == 0) {
-    model.Save("lapsrn." + param_str + ".model");
-    std::cerr << "Model saved" << std::endl;
+  models[0].Save("lapsrn." + param_str + ".model");
+  std::cerr << "Model saved" << std::endl;
 
-    if (argc == 1) {
-      LG << "Training from scratch";
-      auto initializer = Normal(0, sqrt(2.0 / (9.0 * patch_size * patch_size)));
+  if (argc == 1) {
+    LG << "Training from scratch";
+    auto initializer = Normal(0, sqrt(2.0 / (9.0 * patch_size * patch_size)));
+    for (auto &args_map : args_maps) {
       for (auto &arg : args_map) {
         if (arg.first.find('w') != std::string::npos) {
           initializer(arg.first, &arg.second);
@@ -256,121 +265,109 @@ void train_thread(int id, Context ctx,
           Zero()(arg.first, &arg.second);
         }
       }
-    } else {
-      std::string param_name = "lapsrn" + param_str + "_param_" + argv[1];
-      LG << "Loading " << param_name;
-      NDArray::Load(param_name, nullptr, &args_map);
     }
+  } else {
+    std::string param_name = "lapsrn" + param_str + "_param_" + argv[1];
+    LG << "Loading " << param_name;
+    NDArray::Load(param_name, nullptr, &args_maps[0]);
   }
 
-  auto *exec = model.SimpleBind(ctx, args_map);
-  std::vector<int> arg_keys(exec->arg_arrays.size());
+  std::vector<Executor*> execs;
+  for (size_t i = 0; i < ctxs.size(); ++i) {
+    execs.push_back(models[i].SimpleBind(ctxs[i], args_maps[i]));
+  }
+
+  std::vector<int> arg_keys(execs[0]->arg_arrays.size());
   std::iota(arg_keys.begin(), arg_keys.end(), 0);
 
-  if (id == 0) {
-    KVStore::Init(arg_keys, exec->arg_arrays);
-    std::unique_ptr<Optimizer> opt(OptimizerRegistry::Find("adam"));
-    opt->SetParam("rescale_grad", 1.0 / batch_size / num_train_threads);
-    opt->SetParam("lr", learning_rate);
-    opt->SetParam("wd", weight_decay);
-    KVStore::SetOptimizer(std::move(opt), true);
+  KVStore::Init(arg_keys, execs[0]->arg_arrays);
+  std::unique_ptr<Optimizer> opt(OptimizerRegistry::Find("adam"));
+  opt->SetParam("rescale_grad", 1.0 / batch_size / ctxs.size());
+  opt->SetParam("lr", learning_rate);
+  opt->SetParam("wd", weight_decay);
+  KVStore::SetOptimizer(std::move(opt), true);
     
-    LG << "Parameters inited";
-    param_init_cv.notify_all();
-  } else {
-    std::unique_lock<std::mutex> param_init_lock(param_init_mutex);
-    param_init_cv.wait(param_init_lock);
-  }
+  LG << "Parameters inited";
 
-  Monitor mon(1, std::regex("conv.*_output|conv.*_w"));
+  Monitor mon(1, std::regex(".*"));
+  //Monitor mon(1, std::regex("conv.*_output|conv.*_w"));
 
-  //mon.install(exec);
+  //for (auto *exec : execs) mon.install(exec);
 
-  LG << "Thread #" << id << " starts training";
   for (int iter = start_iter; iter < max_epoch; ++iter) {
-    LG << "Thread #" << id << " Epoch: " << iter;
+    LG << " Epoch: " << iter;
     auto tic = std::chrono::system_clock::now();
     int samples = 0;
 
-    PSNR train_psnr;
-    for (auto it = train_begin; it != train_end; ++it) {
-      auto& data = *it;
-      //mon.tic();
-      KVStore::Pull(arg_keys, &exec->arg_arrays);
-      samples += batch_size;
-      data.front().CopyTo(&args_map["data"]);
-      for (int i = 1; i <= level; ++i) {
-        data[i].CopyTo(&args_map["data_label_x" + std::to_string(1<<i)]);
-      }
-      NDArray::WaitAll();
+    //PSNR train_psnr;
+    for (size_t i = 0; i < ctxs.size(); ++i) {
+      int piece = (train_data.size() + ctxs.size() - 1) / ctxs.size();
+      auto train_begin = train_data.cbegin() + i * piece;
+      auto train_end = (i + 1 == ctxs.size()) ? train_data.cend() : train_begin + piece;
+      auto* exec = execs[i];
+      auto& args_map = args_maps[i];
+      for (auto it = train_begin; it != train_end; ++it) {
+        auto& data = *it;
+        //mon.tic();
+        KVStore::Pull(arg_keys, &exec->arg_arrays);
+        samples += batch_size;
+        data.front().CopyTo(&args_map["data"]);
+        for (int j = 1; j <= level; ++j) {
+          data[j].CopyTo(&args_map["data_label_x" + std::to_string(1<<j)]);
+        }
 
-      exec->Forward(true);
-      exec->Backward();
-      {
-        std::lock_guard<std::mutex> guard(push_mutex);
-        KVStore::Push(arg_keys, exec->grad_arrays);
-      }
-      //exec->UpdateAll(opt, learning_rate, weight_decay);
-      train_psnr.Update(data[1], exec->outputs[0]);
-      //mon.toc_print();
+        exec->Forward(true);
+        exec->Backward();
 
-      if (samples % (100 * batch_size) == 0) {
-        LG << "Thread #" << id <<
-          " Epoch:\t" << iter << " : " << samples << " PSNR: " << train_psnr.Get();
+        for (int i = 0; i < exec->grad_arrays.size(); ++i) {
+          NDArray grad(exec->grad_arrays[i].GetShape(), ctxs[0]);
+          exec->grad_arrays[i].CopyTo(&grad);
+          KVStore::Push(arg_keys[i], grad);
+        }
+        //KVStore::Push(arg_keys, exec->grad_arrays);
+
+        //exec->UpdateAll(opt, learning_rate, weight_decay);
+        //train_psnr.Update(data[1], exec->outputs[0]);
+        //mon.toc_print();
+
+        if (samples % (100 * batch_size) == 0) {
+          LG << " Epoch:\t" << iter << " : " << samples;// << " PSNR: " << train_psnr.Get();
+        }
       }
     }
 
     auto toc = std::chrono::system_clock::now();
 
-    if (id == 0) {
-      LG << "Validating...";
-      PSNR acu, data_ac;
-      for (auto &data : val_data) {
-        data.front().CopyTo(&args_map["data"]);
-        for (int i = 1; i <= level; ++i) {
-          data[i].CopyTo(&args_map["data_label_x" + std::to_string(1<<i)]);
-        }
-        NDArray::WaitAll();
-
-        exec->Forward(false);
-        NDArray::WaitAll();
-        acu.Update(data[1], exec->outputs[0]);
-        //data_ac.Update(data.front, data.second);
-      }
-
-      std::string save_path_param = "./lapsrn_" + param_str + "_param_" + std::to_string(iter);
-      auto save_args = args_map;
-      save_args.erase(save_args.find("data"));
+    LG << "Validating...";
+    PSNR acu, data_ac;
+    for (auto &data : val_data) {
+      data.front().CopyTo(&args_maps[0]["data"]);
       for (int i = 1; i <= level; ++i) {
-        save_args.erase(save_args.find("data_label_x" + std::to_string(1<<i)));
+        data[i].CopyTo(&args_maps[0]["data_label_x" + std::to_string(1<<i)]);
       }
-      LG << "ITER:\t" << iter << " Saving to..." << save_path_param;
-      NDArray::Save(save_path_param, save_args);
 
-      float duration = std::chrono::duration_cast<std::chrono::milliseconds>(toc - tic).count() / 1000.0;
-      LG << "Epoch:\t" << iter << " "
-        << samples / duration * patch_size * patch_size
-        << " pixel/sec in "
-        << duration << "s PSNR: " << acu.Get() ;//<< "/" << data_ac.Get();
+      execs[0]->Forward(false);
+      //NDArray::WaitAll();
+      acu.Update(data[1], execs[0]->outputs[0]);
+      //data_ac.Update(data.front, data.second);
     }
+
+    std::string save_path_param = "./lapsrn_" + param_str + "_param_" + std::to_string(iter);
+    auto save_args = args_maps[0];
+    save_args.erase(save_args.find("data"));
+    for (int i = 1; i <= level; ++i) {
+      save_args.erase(save_args.find("data_label_x" + std::to_string(1<<i)));
+    }
+    LG << "ITER:\t" << iter << " Saving to..." << save_path_param;
+    NDArray::Save(save_path_param, save_args);
+
+    float duration = std::chrono::duration_cast<std::chrono::milliseconds>(toc - tic).count() / 1000.0;
+    LG << "Epoch:\t" << iter << " "
+      << samples / duration * patch_size * patch_size
+      << " pixel/sec in "
+      << duration << "s PSNR: " << acu.Get() ;//<< "/" << data_ac.Get();
   }
-}
-
-int main(int argc, char *argv[])
-{
-  const std::vector<Context> ctxs{
-    Context::gpu(0), Context::gpu(1), Context::gpu(2), Context::gpu(3)};
-
-  std::vector<std::string> train_paths, val_paths;
-  std::tie(train_paths, val_paths) = ListFolder("/home/data/xlidc/png", 0.9);
-
-  auto train_data = ReadImages<level>(train_paths, patch_size, batch_size);
-  auto val_data = ReadImages<level>(val_paths, patch_size, batch_size);
-
-  KVStore::SetType("local");
-
-  std::vector<std::thread> threads;
-  num_train_threads = ctxs.size();
+    /*
   for (size_t i = 0; i < ctxs.size(); ++i) {
     int piece = (train_data.size() + ctxs.size() - 1) / ctxs.size();
     auto begin = train_data.cbegin() + i * piece;
@@ -382,6 +379,7 @@ int main(int argc, char *argv[])
   for (auto& thread : threads) {
     thread.join();
   }
+        */
 
   MXNotifyShutdown();
   return 0;
